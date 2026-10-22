@@ -29,6 +29,7 @@ class Analyst:
             "campaigns": await self._campaign_performance(),
             "intents": await self._intent_breakdown(),
             "stages": await self._stage_breakdown(),
+            "outbox": await self.state.count_outbox_by_status(),
             "insights": [],
         }
 
@@ -90,6 +91,7 @@ class Analyst:
         intents = report.get("intents") or {}
         campaigns = report.get("campaigns") or []
         stages = report.get("stages") or {}
+        outbox = report.get("outbox") or {}
 
         # Pipeline health
         total_new = pipeline.get("new", 0)
@@ -170,10 +172,18 @@ class Analyst:
                 "ACTION: Prospects engage but none reach closing. Update prompts/handler.md "
                 "CLOSING guidance to propose specific meeting times earlier (by message 2)."
             )
-        if total_queued > 0 and total_contacted == 0:
+        awaiting_review = outbox.get("pending_review", 0)
+        if awaiting_review:
+            insights.append(
+                f"WAITING ON YOU: {awaiting_review} email(s) are in the Outbox awaiting your "
+                "approval. Nothing sends until you approve them (dashboard Outbox tab, or "
+                "'harvey outbox')."
+            )
+        elif total_queued > 0 and total_contacted == 0 and not outbox.get("approved", 0):
             insights.append(
                 f"BLOCKED: {total_queued} prospects are queued but nothing has been sent. "
-                "Check the Instantly API key and Sender logs — campaigns may be failing to deploy."
+                "Check the email provider settings and the Sender logs: campaigns may be "
+                "failing to deploy, or sending may be paused."
             )
         if total_new < 10 and total_queued == 0:
             insights.append(

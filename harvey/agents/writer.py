@@ -34,6 +34,8 @@ PERSON_VAR = re.compile(r"\{\{\s*(first_?name|last_?name|title)\s*\}\}", re.IGNO
 
 # Native mode: one Claude call per prospect for email 1, so batches stay
 # small — the rest of the 'new' pool is picked up on later cycles.
+MERGE_TAGS = ("first_name", "company", "title")  # named in prompts/writer.md; Sender fills them
+
 NATIVE_BATCH_CAP = 8
 LEGACY_BATCH_CAP = 50
 
@@ -296,6 +298,7 @@ class Writer:
             persona_company=self.config.persona.company,
             persona_role=self.config.persona.role,
             persona_tone=self.config.persona.tone,
+            merge_tags=MERGE_TAGS,
         ) or ""
         if self.skills:
             prompt += "\n\n" + self.skills
@@ -365,6 +368,7 @@ Return ONLY JSON: {{"subject": "...", "body": "..."}}"""
             persona_company=self.config.persona.company,
             persona_role=self.config.persona.role,
             persona_tone=self.config.persona.tone,
+            merge_tags=MERGE_TAGS,
         )
 
         if not prompt:

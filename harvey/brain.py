@@ -672,8 +672,13 @@ class Brain:
         calls = await self.check_usage()
         return calls < max_daily_calls
 
-    def load_prompt(self, prompt_name: str, **kwargs) -> str:
-        """Load a prompt template from the prompts/ directory and fill in variables."""
+    def load_prompt(self, prompt_name: str, *, merge_tags: tuple[str, ...] = (),
+                    **kwargs) -> str:
+        """Load a prompt template from the prompts/ directory and fill in variables.
+
+        merge_tags: {{tags}} the template names on purpose and leaves for the
+        Sender to fill per prospect, so they aren't reported as unfilled.
+        """
         prompt_file = PROMPTS_DIR / f"{prompt_name}.md"
         try:
             template = read_user_text(prompt_file)
@@ -686,7 +691,7 @@ class Brain:
         for key, value in kwargs.items():
             template = template.replace(f"{{{{{key}}}}}", str(value))
         # Surface templating mistakes early instead of sending {{foo}} to Claude
-        leftover = re.findall(r"\{\{(\w+)\}\}", template)
+        leftover = [v for v in re.findall(r"\{\{(\w+)\}\}", template) if v not in merge_tags]
         if leftover:
             logger.warning(
                 f"Prompt '{prompt_name}' has unfilled variables: {sorted(set(leftover))}"

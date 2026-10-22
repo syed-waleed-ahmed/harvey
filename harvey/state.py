@@ -1108,6 +1108,13 @@ class StateManager:
             await db.commit()
             return cursor.rowcount
 
+    async def count_outbox_by_status(self) -> dict[str, int]:
+        async with self._connect() as db:
+            async with db.execute(
+                "SELECT status, COUNT(*) FROM outbox GROUP BY status"
+            ) as cursor:
+                return {status: n for status, n in await cursor.fetchall()}
+
     async def count_outbox_sent(self) -> int:
         async with self._connect() as db:
             async with db.execute(

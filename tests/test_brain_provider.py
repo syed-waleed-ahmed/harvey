@@ -751,3 +751,15 @@ def test_cli_status_hides_another_providers_pause(monkeypatch, tmp_path, capsys)
                       config=BrainConfig(provider="codex", model="gpt-5.5"),
                       setting=_STALE_CODEX_PAUSE)
     assert "Codex PAUSED" in out
+
+
+def test_declared_merge_tags_are_not_reported_unfilled(tmp_path, monkeypatch, caplog):
+    # prompts/writer.md names {{first_name}} etc. on purpose; the Sender
+    # fills them per prospect. Only a real templating mistake should warn.
+    (tmp_path / "w.md").write_text("Hi {{first_name}} at {{company}}, {{oops}}", encoding="utf-8")
+    monkeypatch.setattr(brain_mod, "PROMPTS_DIR", tmp_path)
+    with caplog.at_level("WARNING", logger="harvey.brain"):
+        out = Brain.load_prompt(object.__new__(Brain), "w",
+                                merge_tags=("first_name", "company"))
+    assert out == "Hi {{first_name}} at {{company}}, {{oops}}"
+    assert "unfilled variables: ['oops']" in caplog.text
