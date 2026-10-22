@@ -25,6 +25,7 @@ from fastapi.responses import (
 logger = logging.getLogger("harvey.dashboard")
 
 from harvey import dashboard_auth as auth  # noqa: E402
+from harvey import pidfile  # noqa: E402
 from harvey.paths import PROJECT_ROOT  # noqa: E402
 from harvey.textio import read_user_text  # noqa: E402
 DB_PATH = PROJECT_ROOT / "data" / "harvey.db"
@@ -157,17 +158,19 @@ def _write_env_file(updates: dict[str, str]):
 
 
 def _check_harvey_pid() -> int | None:
-    """Check if there's a running Harvey process from a PID file."""
+    """The running heartbeat's PID: whoever holds the run lock (a `harvey run`
+    started in a terminal counts too), else a child we just started that
+    hasn't taken the lock yet."""
     global _harvey_process, _harvey_started_at
-    if _harvey_process and _harvey_process.poll() is None:
-        return _harvey_process.pid
-    if PID_FILE.exists():
-        try:
-            pid = int(PID_FILE.read_text(encoding="utf-8").strip())
-            os.kill(pid, 0)  # Check if process exists
-            return pid
-        except (ValueError, ProcessLookupError, PermissionError):
-            PID_FILE.unlink(missing_ok=True)
+    pid = pidfile.running_pid(PID_FILE)
+    if pid:
+        return pid
+    if _harvey_process is not None:
+        if _harvey_process.poll() is None:
+            return _harvey_process.pid
+        # It exited (stopped, crashed, or found another heartbeat running).
+        _harvey_process = None
+        _harvey_started_at = None
     return None
 
 
@@ -530,7 +533,7 @@ async def start_harvey():
         log_handle = open(LOG_FILE, "a", encoding="utf-8")
         try:
             _harvey_process = subprocess.Popen(
-                [sys.executable, "-m", "harvey"],
+                [sys.executable, "-m", "harvey", "run"],
                 cwd=str(PROJECT_ROOT),
                 stdout=log_handle,
                 stderr=log_handle,
@@ -543,13 +546,9 @@ async def start_harvey():
         logger.warning("Failed to start Harvey: %s", e)
         return {"success": False, "message": f"Failed to start Harvey: {e}"}
     _harvey_started_at = datetime.now()
-
-    # Write PID file
-    try:
-        PID_FILE.write_text(str(_harvey_process.pid), encoding="utf-8")
-    except OSError as e:
-        logger.warning("Could not write PID file: %s", e)
-
+    # No PID file write here: the heartbeat records its own PID when it takes
+    # the run lock (on Windows, a venv's python.exe is a launcher, so the
+    # child's PID isn't the heartbeat's).
     return {"success": True, "pid": _harvey_process.pid}
 
 
@@ -562,27 +561,30 @@ async def stop_harvey():
     if not pid:
         return {"success": False, "message": "Harvey is not running."}
 
+    # On Windows SIGTERM is TerminateProcess (no graceful finish) and there is
+    # no SIGKILL; a process that is already gone raises a plain OSError there.
     try:
         os.kill(pid, signal.SIGTERM)
-        # Wait briefly for graceful shutdown
-        for _ in range(10):
-            try:
-                os.kill(pid, 0)
-                await asyncio.sleep(0.5)
-            except ProcessLookupError:
-                break
-        else:
-            # Force kill if still running
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError):
-                pass
-    except (ProcessLookupError, PermissionError):
+    except OSError:
         pass
+    # Wait briefly for graceful shutdown
+    for _ in range(10):
+        if _check_harvey_pid() != pid:
+            break
+        await asyncio.sleep(0.5)
+    else:
+        # Force kill if still running
+        try:
+            os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+        except OSError:
+            pass
+    # The child we started may still be up if the heartbeat never got as far
+    # as taking the lock (on Windows it may be just the venv launcher).
+    if _harvey_process is not None and _harvey_process.poll() is None:
+        _harvey_process.kill()
 
     _harvey_process = None
     _harvey_started_at = None
-    PID_FILE.unlink(missing_ok=True)
 
     return {"success": True}
 

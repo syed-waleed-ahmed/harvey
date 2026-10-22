@@ -8,6 +8,7 @@ from datetime import datetime, time, timedelta
 
 import pytz
 
+from harvey import pidfile
 from harvey.brain import Brain
 from harvey.config import (
     ConfigError, load_config, load_env, HarveyConfig, legacy_sending_held, sending_notice,
@@ -463,10 +464,20 @@ def main():
         asyncio.run(run_setup())
         return
 
+    # Two heartbeats would prospect, write and drain the Outbox twice over.
+    try:
+        lock = pidfile.claim()
+    except pidfile.AlreadyRunning as e:
+        print(f"\n  {e} Stop that one first (Ctrl+C in its terminal, or the "
+              "dashboard's Controls tab).\n")
+        sys.exit(1)
+
     try:
         asyncio.run(_run_with_signals())
     except KeyboardInterrupt:
         logger.info("Goodbye.")
+    finally:
+        pidfile.release(lock)
 
 
 if __name__ == "__main__":
