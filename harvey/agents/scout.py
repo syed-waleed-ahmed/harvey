@@ -110,6 +110,21 @@ _SENIOR_KEYWORDS = (
 )
 
 
+def _indeed_country(geo: str) -> str:
+    """The Indeed country site to search for an ICP geography.
+
+    Indeed runs one site per country and jobspy searches the US one unless
+    told otherwise, so a bare "Italy" turns up jobs near Italy, Texas.
+    Anything jobspy doesn't know as a country ("Europe", a city) keeps the
+    US default.
+    """
+    try:
+        from jobspy.model import Country
+        return Country(geo).value
+    except (ImportError, ValueError):
+        return "usa"
+
+
 class Scout:
     def __init__(
         self,
@@ -1584,6 +1599,7 @@ Respond ONLY with the JSON array."""
                 site_name=["indeed"],
                 search_term=search_term,
                 location=geo,
+                country_indeed=_indeed_country(geo),
                 results_wanted=15,
                 hours_old=24 * 14,  # fresh signal only: last two weeks
             )
@@ -1617,6 +1633,11 @@ Respond ONLY with the JSON array."""
             company_name = str(row.get("company") or "").strip()
             job_title = str(row.get("title") or "").strip()[:80]
             if not company_name or company_name.lower() in seen_names:
+                continue
+            # Indeed matches loosely ("AI Engineer" brings back a "BU
+            # Director"), and the posting becomes the email's hook, so only
+            # a posting for one of the signal roles counts as the signal.
+            if not any(k in job_title.lower() for k in keywords):
                 continue
             seen_names.add(company_name.lower())
 
